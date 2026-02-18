@@ -32,6 +32,17 @@ def pick_agents(agents):
     return random.sample(agents, 2)
 
 
+def next_battle_index(battles_dir):
+    if not os.path.isdir(battles_dir):
+        return 1
+    max_idx = 0
+    for name in os.listdir(battles_dir):
+        m = re.match(r"battle-(\d+)\.md$", name)
+        if m:
+            max_idx = max(max_idx, int(m.group(1)))
+    return max_idx + 1
+
+
 def parse_topic(first_text):
     m = re.search(r"議題\s*[:：]\s*(.+)", first_text)
     if not m:
@@ -127,20 +138,25 @@ def battle(index, agents):
     return "\n".join(battle_md), loser.name
 
 
-def main():
-    client = build_client_from_env()
-    agents = load_agents(client)
-
-    os.makedirs("battles", exist_ok=True)
+def aggregate_losses(agents, battles_dir):
     losses = {a.name: 0 for a in agents}
+    for name in os.listdir(battles_dir):
+        m = re.match(r"battle-(\d+)\.md$", name)
+        if not m:
+            continue
+        path = os.path.join(battles_dir, name)
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        m_loser = re.search(r"-\s*敗者:\s*(.+)", content)
+        if not m_loser:
+            continue
+        loser_name = m_loser.group(1).strip()
+        if loser_name in losses:
+            losses[loser_name] += 1
+    return losses
 
-    for i in range(1, 31):
-        md, loser_name = battle(i, agents)
-        losses[loser_name] += 1
-        path = os.path.join("battles", f"battle-{i}.md")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(md)
 
+def write_final(agents, losses):
     sorted_losses = sorted(losses.items(), key=lambda x: (-x[1], x[0]))
     max_loss = sorted_losses[0][1]
     candidates = [k for k, v in losses.items() if v == max_loss]
@@ -167,7 +183,30 @@ def main():
     with open("final.md", "w", encoding="utf-8") as f:
         f.write("\n".join(result_md))
 
-    print("battles written, final.md updated")
+
+def main():
+    client = build_client_from_env()
+    agents = load_agents(client)
+
+    battles_dir = "battles"
+    os.makedirs(battles_dir, exist_ok=True)
+    index = next_battle_index(battles_dir)
+    if index > 30:
+        print("already reached 30 battles; no new battle generated")
+        losses = aggregate_losses(agents, battles_dir)
+        write_final(agents, losses)
+        print("final.md updated from existing battles")
+        return
+
+    md, _ = battle(index, agents)
+    path = os.path.join(battles_dir, f"battle-{index}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(md)
+
+    losses = aggregate_losses(agents, battles_dir)
+    write_final(agents, losses)
+
+    print(f"battle-{index}.md written, final.md updated")
 
 
 if __name__ == "__main__":

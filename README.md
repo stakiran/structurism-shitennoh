@@ -23,9 +23,11 @@ python .\scripts\run_battles.py
 
 ### 動作仕様
 - 5人を `1-人物 = 1-agent` として扱う
-- 1on1 をランダムに 30 回実行する
+- 1回の実行で 1on1 をランダムに 1 回だけ実行する
+- 何回目かは `battles/` 内の `battle-*.md` を見て自動判定する（次の番号を採用）
 - 1ターンの発話ごとに Responses API を 1 回呼ぶ
 - 見物者 3 人の敗者判定も、それぞれ API を 1 回呼ぶ
+- `battle-30.md` が存在する状態で実行した場合、新規バトルは作らず既存結果から `final.md` のみ更新する
 
 ### 出力ファイル
 - `battles/battle-1.md` 〜 `battles/battle-30.md`
