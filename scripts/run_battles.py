@@ -1,49 +1,30 @@
 # -*- coding: utf-8 -*-
 import os
 import random
+import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agents.levi import create as create_levi
-from agents.lacan import create as create_lacan
-from agents.foucault import create as create_foucault
 from agents.althusser import create as create_althusser
 from agents.barthes import create as create_barthes
-
-OPENERS = [
-    "議題をここに置く。",
-    "まず焦点を定める。",
-    "私の立場から論点を提示する。",
-    "この問題から始めよう。",
-]
-
-RESPONSES = [
-    "あなたの主張を受けて言う。",
-    "その前提を押さえたうえで答える。",
-    "異議はあるが、議論を進める。",
-    "同意しつつ、別の角度を示す。",
-]
-
-CLOSERS = [
-    "この点は譲れない。",
-    "私はここで結論を示す。",
-    "この構図が決定的だ。",
-    "最後に論点を固定する。",
-]
+from agents.base import build_client_from_env
+from agents.foucault import create as create_foucault
+from agents.lacan import create as create_lacan
+from agents.levi import create as create_levi
 
 random.seed(42)
 
 
-def load_agents():
+def load_agents(client):
     return [
-        create_levi(),
-        create_lacan(),
-        create_foucault(),
-        create_althusser(),
-        create_barthes(),
+        create_levi(client),
+        create_lacan(client),
+        create_foucault(client),
+        create_althusser(client),
+        create_barthes(client),
     ]
 
 
@@ -51,48 +32,76 @@ def pick_agents(agents):
     return random.sample(agents, 2)
 
 
-def run_turn(agent, topic, context, used_sentences, is_open=False, is_close=False):
-    if is_open:
-        sentence = agent.respond(topic, context, used_sentences)
-        return f"{random.choice(OPENERS)} 議題は『{topic}』だ。 {sentence}"
-    if is_close:
-        sentence = agent.respond(topic, context, used_sentences)
-        return f"{random.choice(CLOSERS)} {sentence}"
-    sentence = agent.respond(topic, context, used_sentences)
-    return f"{random.choice(RESPONSES)} {sentence}"
+def parse_topic(first_text):
+    m = re.search(r"議題\s*[:：]\s*(.+)", first_text)
+    if not m:
+        return "構造主義における理論の中核"
+    raw = m.group(1).strip()
+    first_line = raw.splitlines()[0].strip()
+    return first_line if first_line else "構造主義における理論の中核"
+
+
+def parse_judge(raw_text, a_name, b_name):
+    loser = None
+    reason = ""
+
+    for line in raw_text.splitlines():
+        if line.startswith("敗者:"):
+            candidate = line.split(":", 1)[1].strip()
+            if candidate in (a_name, b_name):
+                loser = candidate
+        if line.startswith("理由:"):
+            reason = line.split(":", 1)[1].strip()
+
+    if loser is None:
+        if a_name in raw_text and b_name not in raw_text:
+            loser = a_name
+        elif b_name in raw_text and a_name not in raw_text:
+            loser = b_name
+        else:
+            loser = a_name
+
+    if not reason:
+        reason = "議論の一貫性と議題適合性の観点で相対的に弱いと判断した。"
+
+    return loser, reason
+
+
+def transcript_to_text(transcript):
+    return "\n".join([f"T{t:02d} {name}: {text}" for t, name, text in transcript])
 
 
 def battle(index, agents):
     a, b = pick_agents(agents)
-    topic = a.propose_topic()
     turns = random.randint(12, 30)
 
     transcript = []
-    used = {a.name: set(), b.name: set()}
 
-    for t in range(1, turns + 1):
-        speaker = a if t % 2 == 1 else b
-        if t == 1:
-            text = run_turn(speaker, topic, transcript, used[speaker.name], is_open=True)
-        elif t == turns:
-            text = run_turn(speaker, topic, transcript, used[speaker.name], is_close=True)
-        else:
-            text = run_turn(speaker, topic, transcript, used[speaker.name])
-        transcript.append((t, speaker.name, text))
+    first_text = a.first_turn()
+    topic = parse_topic(first_text)
+    transcript.append((1, a.name, first_text.strip()))
+
+    for t in range(2, turns + 1):
+        speaker = b if t % 2 == 0 else a
+        text = speaker.turn(topic, transcript_to_text(transcript))
+        transcript.append((t, speaker.name, text.strip()))
 
     spectators = [x for x in agents if x not in (a, b)]
 
     votes = []
     for s in spectators:
-        loser_name = s.vote(topic, transcript, [a, b])
-        reason = f"自身の関心語彙との整合と論点集中度を評価した。"
+        judge_raw = s.judge_loser(topic, transcript_to_text(transcript), a.name, b.name)
+        loser_name, reason = parse_judge(judge_raw, a.name, b.name)
         votes.append((s.name, loser_name, reason))
 
     lose_counts = {a.name: 0, b.name: 0}
     for _, loser_name, _ in votes:
         lose_counts[loser_name] += 1
 
-    loser = a if lose_counts[a.name] > lose_counts[b.name] else b
+    if lose_counts[a.name] == lose_counts[b.name]:
+        loser = a
+    else:
+        loser = a if lose_counts[a.name] > lose_counts[b.name] else b
 
     battle_md = []
     battle_md.append(f"# battle-{index}")
@@ -119,7 +128,9 @@ def battle(index, agents):
 
 
 def main():
-    agents = load_agents()
+    client = build_client_from_env()
+    agents = load_agents(client)
+
     os.makedirs("battles", exist_ok=True)
     losses = {a.name: 0 for a in agents}
 
@@ -138,7 +149,6 @@ def main():
         drop_name = candidates[0]
         tiebreak = ""
     else:
-        # tie-breaker based on alphabetical (deterministic)
         drop_name = sorted(candidates)[0]
         tiebreak = f"同数だったため、五十音順で決定。候補: {', '.join(sorted(candidates))}"
 

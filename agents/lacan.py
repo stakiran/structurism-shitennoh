@@ -2,5 +2,5 @@
 from .base import Agent
 
 
-def create():
-    return Agent("ジャック・ラカン", "profiles/jacques-lacan.md")
+def create(client):
+    return Agent("ジャック・ラカン", "profiles/jacques-lacan.md", client)
