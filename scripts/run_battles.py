@@ -15,9 +15,6 @@ from agents.foucault import create as create_foucault
 from agents.lacan import create as create_lacan
 from agents.levi import create as create_levi
 
-random.seed(42)
-
-
 def load_agents(client):
     return [
         create_levi(client),
